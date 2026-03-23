@@ -24,16 +24,17 @@ class handler(BaseHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             user_message = json.loads(self.rfile.read(content_length))['message']
 
-            # 1. 修复新版 SDK 语法：降维参数必须放在 config 字典里
+            # 向量化问题 
+            # 在 api/index.py 的 do_POST 方法中修改这一段：
             emb_res = client.models.embed_content(
                 model="gemini-embedding-001", 
                 contents=user_message,
-                config={"output_dimensionality": 768}  
+                output_dimensionality=768  # <--- 新增这个参数
             )
-            # 删除了多余的重复行
+            query_vector = emb_res.embeddings[0].values
             query_vector = emb_res.embeddings[0].values
 
-            # 查询 Pinecone
+            # 查询 Pinecone [cite: 14]
             pc_res = requests.post(
                 f"{pc_host}/query",
                 headers={"Api-Key": pc_key, "Content-Type": "application/json"},
@@ -42,10 +43,10 @@ class handler(BaseHTTPRequestHandler):
             matches = pc_res.json().get('matches', [])
             context = "\n---\n".join([m['metadata']['text'] for m in matches if 'metadata' in m])
 
-            # 生成回答：已在底层 Prompt 加入纯英文输出设定
+            # 生成回答 [cite: 1]
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
-                contents=f"Context:\n{context}\n\nQuestion: {user_message}\n\nAnswer based on context. Note: Ensure all game theory concepts and analysis are purely in English:"
+                contents=f"Context:\n{context}\n\nQuestion: {user_message}\n\nAnswer based on context:"
             )
             
             self.send_response(200)
@@ -54,8 +55,5 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'reply': response.text}).encode('utf-8'))
 
         except Exception as e:
-            # 2. 核心修复：补全了 HTTP 头部，确保哪怕出错也能把具体的错误文本传回浏览器
             self.send_response(500)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
             self.wfile.write(json.dumps({'reply': f"Error: {str(e)}"}).encode('utf-8'))
