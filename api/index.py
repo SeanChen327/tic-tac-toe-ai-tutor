@@ -32,7 +32,6 @@ class handler(BaseHTTPRequestHandler):
                 output_dimensionality=768  # <--- 新增这个参数
             )
             query_vector = emb_res.embeddings[0].values
-            query_vector = emb_res.embeddings[0].values
 
             # 查询 Pinecone [cite: 14]
             pc_res = requests.post(
