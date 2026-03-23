@@ -1,19 +1,16 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
-from google import genai
-from google.genai import types
 
-# 引入 LangChain 核心组件
-from langchain_community.document_loaders import TextLoader
+# 仅引入 LangChain 核心与 Google 模块，保持极度轻量
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.vectorstores import FAISS
-from langchain.chains import create_retrieval_chain
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.documents import Document
 from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate
 
-# 全局变量缓存向量数据库，防止 Vercel 每次请求都重新读取文件
 vector_store = None
 
 def get_vector_store(api_key):
@@ -21,28 +18,30 @@ def get_vector_store(api_key):
     if vector_store is not None:
         return vector_store
 
-    # 1. 加载我们在根目录准备好的知识库
+    # 1. 使用纯 Python 读取文件，省去加载沉重的 langchain-community
     file_path = os.path.join(os.path.dirname(__file__), '..', 'knowledge.txt')
-    loader = TextLoader(file_path, encoding='utf-8')
-    docs = loader.load()
+    with open(file_path, 'r', encoding='utf-8') as f:
+        text_content = f.read()
+    
+    # 将纯文本包装成 LangChain 需要的 Document 格式
+    docs = [Document(page_content=text_content)]
 
-    # 2. 将长文本切分成小块 (Chunking)
+    # 2. 文本切块
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
     splits = text_splitter.split_documents(docs)
 
-    # 3. 初始化 Google 的向量化模型 (Embedding)
+    # 3. 初始化 Embedding 模型
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", 
         google_api_key=api_key
     )
 
-    # 4. 使用 FAISS 构建本地内存级别的向量数据库
-    vector_store = FAISS.from_documents(splits, embeddings)
+    # 4. 使用纯 Python 的内存向量库替代 FAISS！完美兼容 Vercel
+    vector_store = InMemoryVectorStore.from_documents(splits, embeddings)
     return vector_store
 
 class handler(BaseHTTPRequestHandler):
     
-    # 保持原样的 GET 方法，用于展示游戏界面
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -56,7 +55,6 @@ class handler(BaseHTTPRequestHandler):
             error_page = f"<h1>Loading Error</h1><p>{str(e)}</p>"
             self.wfile.write(error_page.encode('utf-8'))
 
-    # 重构后的 POST 方法，接入 LangChain RAG 架构
     def do_POST(self):
         try:
             content_length = int(self.headers['Content-Length'])
@@ -73,18 +71,17 @@ class handler(BaseHTTPRequestHandler):
             if not api_key:
                 raise Exception("API Key missing.")
             
-            # 获取或初始化向量数据库
+            # 获取极速版内存向量库
             v_store = get_vector_store(api_key)
-            retriever = v_store.as_retriever(search_kwargs={"k": 2}) # 每次检索最相关的 2 个文本块
+            retriever = v_store.as_retriever(search_kwargs={"k": 2})
 
-            # 初始化 LLM 模型
+            # 初始化大模型
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash",
                 google_api_key=api_key,
-                temperature=0.3 # 降低随机性，让回答更严谨
+                temperature=0.3
             )
 
-            # 设定 RAG 的系统提示词模板
             system_prompt = (
                 "You are an expert Tic-Tac-Toe AI assistant. "
                 "Use the following pieces of retrieved game theory context to answer the player's question. "
@@ -97,11 +94,10 @@ class handler(BaseHTTPRequestHandler):
                 ("human", "{input}"),
             ])
 
-            # 将检索器和语言模型链式组合
+            # 执行 RAG 检索链
             question_answer_chain = create_stuff_documents_chain(llm, prompt)
             rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-            # 执行查询
             response = rag_chain.invoke({"input": user_message})
             ai_reply = response["answer"]
 
