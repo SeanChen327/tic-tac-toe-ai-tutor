@@ -25,15 +25,14 @@ class handler(BaseHTTPRequestHandler):
             user_message = json.loads(self.rfile.read(content_length))['message']
 
             # 向量化问题 
-            # 在 api/index.py 的 do_POST 方法中修改这一段：
             emb_res = client.models.embed_content(
                 model="gemini-embedding-001", 
                 contents=user_message,
-                output_dimensionality=768  # <--- 新增这个参数
+                config={"output_dimensionality": 768}  # <--- 核心修复：新版 SDK 必须将参数包在 config 字典里
             )
             query_vector = emb_res.embeddings[0].values
 
-            # 查询 Pinecone [cite: 14]
+            # 查询 Pinecone 
             pc_res = requests.post(
                 f"{pc_host}/query",
                 headers={"Api-Key": pc_key, "Content-Type": "application/json"},
@@ -42,10 +41,10 @@ class handler(BaseHTTPRequestHandler):
             matches = pc_res.json().get('matches', [])
             context = "\n---\n".join([m['metadata']['text'] for m in matches if 'metadata' in m])
 
-            # 生成回答 [cite: 1]
+            # 生成回答：已在 Prompt 末尾加入纯英文输出的强制设定
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
-                contents=f"Context:\n{context}\n\nQuestion: {user_message}\n\nAnswer based on context:"
+                contents=f"Context:\n{context}\n\nQuestion: {user_message}\n\nAnswer based on context. Note: Ensure all game theory concepts and analysis are purely in English:"
             )
             
             self.send_response(200)
@@ -54,7 +53,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'reply': response.text}).encode('utf-8'))
 
         except Exception as e:
-            # 核心新增：把具体的死因强行打印到 Vercel 的日志屏幕上！
+            # 核心兜底机制：把具体的死因强行打印到 Vercel 的日志屏幕上！
             print(f"🔥 FATAL ERROR CAUGHT: {str(e)}")
             
             self.send_response(500)
