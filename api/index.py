@@ -54,5 +54,10 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'reply': response.text}).encode('utf-8'))
 
         except Exception as e:
+            # 核心新增：把具体的死因强行打印到 Vercel 的日志屏幕上！
+            print(f"🔥 FATAL ERROR CAUGHT: {str(e)}")
+            
             self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
             self.wfile.write(json.dumps({'reply': f"Error: {str(e)}"}).encode('utf-8'))
