@@ -27,7 +27,7 @@ class handler(BaseHTTPRequestHandler):
             # 向量化问题 
             # 在 api/index.py 的 do_POST 方法中修改这一段：
             emb_res = client.models.embed_content(
-                model="embedding-001",  # 保持一致
+                model="gemini-embedding-001",  # <--- 保持与充能脚本完全一致
                 contents=user_message
             )
             query_vector = emb_res.embeddings[0].values
