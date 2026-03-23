@@ -24,11 +24,11 @@ class handler(BaseHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             user_message = json.loads(self.rfile.read(content_length))['message']
 
-            # 向量化问题 
+            # 向量化问题（必须保留 config 语法以适配最新 SDK）
             emb_res = client.models.embed_content(
                 model="gemini-embedding-001", 
                 contents=user_message,
-                config={"output_dimensionality": 768}  # <--- 核心修复：新版 SDK 必须将参数包在 config 字典里
+                config={"output_dimensionality": 768}
             )
             query_vector = emb_res.embeddings[0].values
 
@@ -41,9 +41,9 @@ class handler(BaseHTTPRequestHandler):
             matches = pc_res.json().get('matches', [])
             context = "\n---\n".join([m['metadata']['text'] for m in matches if 'metadata' in m])
 
-            # 生成回答：已在 Prompt 末尾加入纯英文输出的强制设定
+            # --- 核心修改点：切换模型为 gemini-1.5-flash ---
             response = client.models.generate_content(
-                model="gemini-2.0-flash", # 换回 2.0-flash，它是目前最稳定的版本
+                model="gemini-1.5-flash", 
                 contents=f"Context:\n{context}\n\nQuestion: {user_message}\n\nAnswer based on context. Note: Ensure all game theory concepts and analysis are purely in English:"
             )
             
@@ -53,7 +53,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'reply': response.text}).encode('utf-8'))
 
         except Exception as e:
-            # 核心兜底机制：把具体的死因强行打印到 Vercel 的日志屏幕上！
+            # 调试日志：如果依然报错，Vercel Logs 会显示具体原因
             print(f"🔥 FATAL ERROR CAUGHT: {str(e)}")
             
             self.send_response(500)
