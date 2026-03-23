@@ -4,48 +4,59 @@ import os
 from google import genai
 from google.genai import types
 
-SYSTEM_PROMPT = """
-You are an AI assistant embedded within a Tic-Tac-Toe game. Your role is to help players understand the game, learn strategies, and troubleshoot. 
-Always respond in English. Keep answers concise, friendly, and helpful. Do not answer questions unrelated to the game.
+# 引入 LangChain 核心组件
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_community.vectorstores import FAISS
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate
 
-[Game Rules]
-- Played on a 3x3 grid.
-- Players take turns placing 'X' or 'O'.
-- First to get 3 in a row (horizontal, vertical, diagonal) wins.
-- If all 9 squares are filled and no one wins, it's a draw.
+# 全局变量缓存向量数据库，防止 Vercel 每次请求都重新读取文件
+vector_store = None
 
-[Strategies]
-- Center Control: Taking the center square first gives the highest chance of winning.
-- Corner Control: If the center is taken, aim for the corners.
-- Defense: Always block the opponent if they have two in a row.
-- Forking: Create a situation where you have two distinct ways to win on your next turn.
+def get_vector_store(api_key):
+    global vector_store
+    if vector_store is not None:
+        return vector_store
 
-[FAQ]
-Q: Can you play the game for me?
-A: No, I am a guide. I can explain rules and strategies, but you must play the game yourself.
-Q: Why can't I ever win?
-A: Tic-Tac-Toe is a solved game; perfect play from both sides always results in a draw. Try focusing on center control or creating forks!
-"""
+    # 1. 加载我们在根目录准备好的知识库
+    file_path = os.path.join(os.path.dirname(__file__), '..', 'knowledge.txt')
+    loader = TextLoader(file_path, encoding='utf-8')
+    docs = loader.load()
+
+    # 2. 将长文本切分成小块 (Chunking)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
+    splits = text_splitter.split_documents(docs)
+
+    # 3. 初始化 Google 的向量化模型 (Embedding)
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001", 
+        google_api_key=api_key
+    )
+
+    # 4. 使用 FAISS 构建本地内存级别的向量数据库
+    vector_store = FAISS.from_documents(splits, embeddings)
+    return vector_store
 
 class handler(BaseHTTPRequestHandler):
     
-    # --- 新增：处理浏览器直接访问的 GET 请求，负责展示游戏界面 ---
+    # 保持原样的 GET 方法，用于展示游戏界面
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
-        
         try:
-            # 找到上一层目录中的 index.html 并读取返回给浏览器
             html_path = os.path.join(os.path.dirname(__file__), '..', 'index.html')
             with open(html_path, 'r', encoding='utf-8') as f:
                 html_content = f.read()
             self.wfile.write(html_content.encode('utf-8'))
         except Exception as e:
-            error_page = f"<h1>Loading Error</h1><p>Failed to read index.html: {str(e)}</p>"
+            error_page = f"<h1>Loading Error</h1><p>{str(e)}</p>"
             self.wfile.write(error_page.encode('utf-8'))
 
-    # --- 原有：处理玩家在聊天框发送消息的 POST 请求 ---
+    # 重构后的 POST 方法，接入 LangChain RAG 架构
     def do_POST(self):
         try:
             content_length = int(self.headers['Content-Length'])
@@ -60,26 +71,48 @@ class handler(BaseHTTPRequestHandler):
 
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
-                raise Exception("API Key is not configured on the server.")
+                raise Exception("API Key missing.")
             
-            client = genai.Client(api_key=api_key)
-            
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=user_message,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                ),
+            # 获取或初始化向量数据库
+            v_store = get_vector_store(api_key)
+            retriever = v_store.as_retriever(search_kwargs={"k": 2}) # 每次检索最相关的 2 个文本块
+
+            # 初始化 LLM 模型
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=api_key,
+                temperature=0.3 # 降低随机性，让回答更严谨
             )
+
+            # 设定 RAG 的系统提示词模板
+            system_prompt = (
+                "You are an expert Tic-Tac-Toe AI assistant. "
+                "Use the following pieces of retrieved game theory context to answer the player's question. "
+                "If you don't know the answer based on the context, just say that you don't know. "
+                "Always respond in English concisely and professionally.\n\n"
+                "Context: {context}"
+            )
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("human", "{input}"),
+            ])
+
+            # 将检索器和语言模型链式组合
+            question_answer_chain = create_stuff_documents_chain(llm, prompt)
+            rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+
+            # 执行查询
+            response = rag_chain.invoke({"input": user_message})
+            ai_reply = response["answer"]
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({'reply': response.text}).encode('utf-8'))
+            self.wfile.write(json.dumps({'reply': ai_reply}).encode('utf-8'))
 
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            error_msg = f"Backend Error: {str(e)}"
+            error_msg = f"RAG Backend Error: {str(e)}"
             self.wfile.write(json.dumps({'reply': error_msg}).encode('utf-8'))
