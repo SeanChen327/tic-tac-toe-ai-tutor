@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic-Tac-Toe & AI Assistant</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 50px;
+        }
+
+        h1 { color: #333; }
+
+        /* Board Styles */
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            grid-gap: 5px;
+            margin-bottom: 20px;
+        }
+
+        .cell {
+            width: 100px;
+            height: 100px;
+            background-color: #fff;
+            border: 2px solid #ccc;
+            font-size: 3em;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            color: #333;
+        }
+        
+        .cell:hover { background-color: #e9e9e9; }
+        #status { font-size: 1.2em; font-weight: bold; margin-bottom: 20px; }
+        button { padding: 10px 20px; font-size: 1em; cursor: pointer; }
+
+        /* AI Chat Widget Styles */
+        #chat-widget {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 300px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: height 0.3s ease;
+        }
+
+        .chat-hidden { height: 40px; }
+        .chat-open { height: 400px; }
+
+        .chat-header {
+            background: #007bff;
+            color: white;
+            padding: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+
+.chat-messages {
+            flex-grow: 1;
+            padding: 10px;
+            overflow-y: auto;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9em;
+            display: flex;             /* 新增：使用 Flexbox 布局 */
+            flex-direction: column;    /* 新增：让消息从上往下垂直排列 */
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;        /* 把气泡变圆润一点 */
+            max-width: 85%;            /* 新增：限制最大宽度，避免长文撑满屏幕 */
+            width: fit-content;        /* 核心修复：宽度根据内容字数自适应！ */
+            word-wrap: break-word;     /* 新增：防止连续的英文字母撑爆气泡 */
+        }
+
+        .user-msg {
+            background: #e3f2fd;
+            align-self: flex-end;      /* 核心修复：让整个玩家气泡靠右贴紧 */
+            text-align: left;          /* 气泡内部的多行文字依然保持左对齐，更易读 */
+        }
+
+        .ai-msg {
+            background: #f1f1f1;
+            align-self: flex-start;    /* 核心修复：让整个 AI 气泡靠左贴紧 */
+        }
+
+        .chat-input {
+            display: flex;
+            padding: 10px;
+        }
+
+        .chat-input input {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .chat-input button {
+            margin-left: 5px;
+            padding: 8px 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Tic-Tac-Toe</h1>
+    <div id="status">Player X's Turn</div>
+    <div class="board" id="board">
+        </div>
+    <button onclick="resetGame()">Restart Game</button>
+
+    <div id="chat-widget" class="chat-hidden">
+        <div class="chat-header" onclick="toggleChat()">
+            <span>🤖 AI Assistant</span>
+            <span id="chat-toggle-icon">▲</span>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="message ai-msg">Hello! I'm your AI assistant. Ask me anything about rules, strategies, or technical issues!</div>
+        </div>
+        <div class="chat-input">
+            <input type="text" id="user-input" placeholder="Type your question..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Logic ---
+        let board = ['', '', '', '', '', '', '', '', ''];
+        let currentPlayer = 'X';
+        let gameActive = true;
+
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('status');
+
+        function initBoard() {
+            boardElement.innerHTML = '';
+            for (let i = 0; i < 9; i++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.setAttribute('data-index', i);
+                cell.addEventListener('click', handleCellClick);
+                boardElement.appendChild(cell);
+            }
+        }
+
+        function handleCellClick(e) {
+            const index = e.target.getAttribute('data-index');
+            if (board[index] !== '' || !gameActive) return;
+
+            board[index] = currentPlayer;
+            e.target.innerText = currentPlayer;
+            checkWin();
+        }
+
+        function checkWin() {
+            const winConditions = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                [0, 4, 8], [2, 4, 6]            
+            ];
+
+            let roundWon = false;
+            for (let condition of winConditions) {
+                const [a, b, c] = condition;
+                if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+                    roundWon = true;
+                    break;
+                }
+            }
+
+            if (roundWon) {
+                statusElement.innerText = `Player ${currentPlayer} Wins!`;
+                gameActive = false;
+                return;
+            }
+
+            if (!board.includes('')) {
+                statusElement.innerText = "It's a Draw!";
+                gameActive = false;
+                return;
+            }
+
+            currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+            statusElement.innerText = `Player ${currentPlayer}'s Turn`;
+        }
+
+        function resetGame() {
+            board = ['', '', '', '', '', '', '', '', ''];
+            currentPlayer = 'X';
+            gameActive = true;
+            statusElement.innerText = `Player ${currentPlayer}'s Turn`;
+            initBoard();
+        }
+
+        // --- Chat Widget Logic ---
+        function toggleChat() {
+            const widget = document.getElementById('chat-widget');
+            const icon = document.getElementById('chat-toggle-icon');
+            if (widget.classList.contains('chat-hidden')) {
+                widget.classList.remove('chat-hidden');
+                widget.classList.add('chat-open');
+                icon.innerText = '▼';
+            } else {
+                widget.classList.remove('chat-open');
+                widget.classList.add('chat-hidden');
+                icon.innerText = '▲';
+            }
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        async function sendMessage() {
+            const inputField = document.getElementById('user-input');
+            const message = inputField.value.trim();
+            if (!message) return;
+
+            addMessageToChat('user', message);
+            inputField.value = '';
+
+            const loadingId = addMessageToChat('ai', 'Thinking...');
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    updateMessageInChat(loadingId, data.reply);
+                } else {
+                    updateMessageInChat(loadingId, 'Failed to connect to the backend. Please try again later.');
+                }
+            } catch (error) {
+                updateMessageInChat(loadingId, 'Local test: Backend not connected yet. Please complete the Python deployment.');
+            }
+        }
+
+        function addMessageToChat(sender, text) {
+            const chatMessages = document.getElementById('chat-messages');
+            const msgDiv = document.createElement('div');
+            msgDiv.classList.add('message');
+            msgDiv.classList.add(sender === 'user' ? 'user-msg' : 'ai-msg');
+            
+            // 优化：将文本中的换行符转换为 HTML 的 <br> 标签，让 AI 的回复排版更清晰
+            msgDiv.innerHTML = text.replace(/\n/g, '<br>');
+            
+            // 修复：加入 Math.random() 确保哪怕在同一毫秒内生成，ID 也绝对唯一
+            msgDiv.id = 'msg-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+            
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight; // 滚动到底部
+            return msgDiv.id;
+        }
+
+        function updateMessageInChat(id, text) {
+            const msgDiv = document.getElementById(id);
+            if (msgDiv) {
+                // 优化：同样支持换行符渲染
+                msgDiv.innerHTML = text.replace(/\n/g, '<br>');
+            }
+        }
+
+        initBoard();
+    </script>
+</body>
+</html>
