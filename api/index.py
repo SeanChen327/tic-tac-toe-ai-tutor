@@ -28,6 +28,24 @@ A: Tic-Tac-Toe is a solved game; perfect play from both sides always results in 
 """
 
 class handler(BaseHTTPRequestHandler):
+    
+    # --- 新增：处理浏览器直接访问的 GET 请求，负责展示游戏界面 ---
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.end_headers()
+        
+        try:
+            # 找到上一层目录中的 index.html 并读取返回给浏览器
+            html_path = os.path.join(os.path.dirname(__file__), '..', 'index.html')
+            with open(html_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            self.wfile.write(html_content.encode('utf-8'))
+        except Exception as e:
+            error_page = f"<h1>Loading Error</h1><p>Failed to read index.html: {str(e)}</p>"
+            self.wfile.write(error_page.encode('utf-8'))
+
+    # --- 原有：处理玩家在聊天框发送消息的 POST 请求 ---
     def do_POST(self):
         try:
             content_length = int(self.headers['Content-Length'])
