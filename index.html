@@ -253,11 +253,15 @@
                     const data = await response.json();
                     updateMessageInChat(loadingId, data.reply);
                 } else {
-                    updateMessageInChat(loadingId, 'Failed to connect to the backend. Please try again later.');
+                    // 核心修复：就算报错，也要把后端传来的真实“死因”解析并打印在聊天框里！
+                    try {
+                        const errorData = await response.json();
+                        updateMessageInChat(loadingId, 'Backend Error: ' + errorData.reply);
+                    } catch (e) {
+                        updateMessageInChat(loadingId, `HTTP Error: ${response.status}`);
+                    }
                 }
-            } catch (error) {
-                updateMessageInChat(loadingId, 'Local test: Backend not connected yet. Please complete the Python deployment.');
-            }
+            } catch (error) { ... }
         }
 
         function addMessageToChat(sender, text) {
