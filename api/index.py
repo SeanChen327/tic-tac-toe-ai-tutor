@@ -43,7 +43,7 @@ class handler(BaseHTTPRequestHandler):
 
             # 生成回答：已在 Prompt 末尾加入纯英文输出的强制设定
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-1.5-flash",  # <--- 改成 1.5-flash 试试
                 contents=f"Context:\n{context}\n\nQuestion: {user_message}\n\nAnswer based on context. Note: Ensure all game theory concepts and analysis are purely in English:"
             )
             
