@@ -243,7 +243,7 @@
             const loadingId = addMessageToChat('ai', 'Thinking...');
 
             try {
-                const response = await fetch('/api', {
+                const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: message })
@@ -253,15 +253,11 @@
                     const data = await response.json();
                     updateMessageInChat(loadingId, data.reply);
                 } else {
-                    // 核心修复：就算报错，也要把后端传来的真实“死因”解析并打印在聊天框里！
-                    try {
-                        const errorData = await response.json();
-                        updateMessageInChat(loadingId, 'Backend Error: ' + errorData.reply);
-                    } catch (e) {
-                        updateMessageInChat(loadingId, `HTTP Error: ${response.status}`);
-                    }
+                    updateMessageInChat(loadingId, 'Failed to connect to the backend. Please try again later.');
                 }
-            } catch (error) { ... }
+            } catch (error) {
+                updateMessageInChat(loadingId, 'Local test: Backend not connected yet. Please complete the Python deployment.');
+            }
         }
 
         function addMessageToChat(sender, text) {
